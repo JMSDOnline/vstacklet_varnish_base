@@ -4,9 +4,9 @@ import std;
 import directors;
 
 backend server1 { # Define one backend
-  .host = "{{server_ip}}";    # IP or Hostname of backend
-  .port = "{{varnish_port}}";           # Port Apache or whatever is listening
-  .max_connections = 300; # That's it
+  .host = "{{server_ip}}";    	# IP or Hostname of backend
+  .port = "{{varnish_port}}";	# Port Apache or whatever is listening
+  .max_connections = 300;		# That's it
 
 #  .probe = {
 #    #.url = "/"; # short easy way (GET /)
