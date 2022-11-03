@@ -1,27 +1,28 @@
-vcl 4.0;
+vcl 4.1;
+# Based on: https://github.com/mattiasgeniar/varnish-6.0-configuration-templates/blob/master/default.vcl
 
 import std;
 import directors;
 
 backend server1 { # Define one backend
-  .host = "{{server_ip}}";    	# IP or Hostname of backend
-  .port = "{{varnish_port}}";	# Port Apache or whatever is listening
-  .max_connections = 300;		# That's it
+  .host = "127.0.0.1";    # IP or Hostname of backend
+  .port = "{{varnish_port}}";           # Port Apache or whatever is listening
+  .max_connections = 300; # That's it
 
-#  .probe = {
-#    #.url = "/"; # short easy way (GET /)
-#    # We prefer to only do a HEAD /
-#    .request =
-#      "HEAD / HTTP/1.1"
-#      "Host: localhost"
-#      "Connection: close"
-#      "User-Agent: Varnish Health Probe";
-#
-#    .interval  = 5s; # check the health of each backend every 5 seconds
-#    .timeout   = 1s; # timing out after 1 second.
-#    .window    = 5;  # If 3 out of the last 5 polls succeeded the backend is considered healthy, otherwise it will be marked as sick
-#    .threshold = 3;
-#  }
+  .probe = {
+    #.url = "/"; # short easy way (GET /)
+    # We prefer to only do a HEAD /
+    .request =
+      "HEAD / HTTP/1.1"
+      "Host: localhost"
+      "Connection: close"
+      "User-Agent: Varnish Health Probe";
+
+    .interval  = 5s; # check the health of each backend every 5 seconds
+    .timeout   = 1s; # timing out after 1 second.
+    .window    = 5;  # If 3 out of the last 5 polls succeeded the backend is considered healthy, otherwise it will be marked as sick
+    .threshold = 3;
+  }
 
   .first_byte_timeout     = 300s;   # How long to wait before we receive a first byte from our backend?
   .connect_timeout        = 5s;     # How long to wait for a backend connection?
@@ -34,15 +35,6 @@ acl purge {
   "127.0.0.1";
   "::1";
 }
-
-/*
-acl editors {
-  # ACL to honor the "Cache-Control: no-cache" header to force a refresh but only from selected IPs
-  "localhost";
-  "127.0.0.1";
-  "::1";
-}
-*/
 
 sub vcl_init {
   # Called when VCL is loaded, before any requests pass through it.
@@ -62,8 +54,13 @@ sub vcl_recv {
 
   set req.backend_hint = vdir.backend(); # send all traffic to the vdir director
 
-  # Normalize the header, remove the port (in case you're testing this on various TCP ports)
-  set req.http.Host = regsub(req.http.Host, ":[0-9]+", "");
+  # Normalize the header if it exists, remove the port (in case you're testing this on various TCP ports)
+  if (req.http.Host) {
+   set req.http.Host = regsub(req.http.Host, ":[0-9]+", "");
+  }
+
+  # Remove the proxy header (see https://httpoxy.org/#mitigate-varnish)
+  unset req.http.proxy;
 
   # Normalize the query arguments
   set req.url = std.querysort(req.url);
@@ -121,44 +118,47 @@ sub vcl_recv {
   }
 
   # Some generic cookie manipulation, useful for all templates that follow
-  # Remove the "has_js" cookie
-  set req.http.Cookie = regsuball(req.http.Cookie, "has_js=[^;]+(; )?", "");
-
-  # Remove any Google Analytics based cookies
-  set req.http.Cookie = regsuball(req.http.Cookie, "__utm.=[^;]+(; )?", "");
-  set req.http.Cookie = regsuball(req.http.Cookie, "_ga=[^;]+(; )?", "");
-  set req.http.Cookie = regsuball(req.http.Cookie, "_gat=[^;]+(; )?", "");
-  set req.http.Cookie = regsuball(req.http.Cookie, "utmctr=[^;]+(; )?", "");
-  set req.http.Cookie = regsuball(req.http.Cookie, "utmcmd.=[^;]+(; )?", "");
-  set req.http.Cookie = regsuball(req.http.Cookie, "utmccn.=[^;]+(; )?", "");
-
-  # Remove DoubleClick offensive cookies
-  set req.http.Cookie = regsuball(req.http.Cookie, "__gads=[^;]+(; )?", "");
-
-  # Remove the Quant Capital cookies (added by some plugin, all __qca)
-  set req.http.Cookie = regsuball(req.http.Cookie, "__qc.=[^;]+(; )?", "");
-
-  # Remove the AddThis cookies
-  set req.http.Cookie = regsuball(req.http.Cookie, "__atuv.=[^;]+(; )?", "");
-
-  # Remove a ";" prefix in the cookie if present
-  set req.http.Cookie = regsuball(req.http.Cookie, "^;\s*", "");
+  # Don't manipulate empty cookies
+  if (req.http.Cookie !~ "^\s*$") {
+    # Remove the "has_js" cookie
+    set req.http.Cookie = regsuball(req.http.Cookie, "has_js=[^;]+(; )?", "");
+  
+    # Remove any Google Analytics based cookies
+    set req.http.Cookie = regsuball(req.http.Cookie, "__utm.=[^;]+(; )?", "");
+    set req.http.Cookie = regsuball(req.http.Cookie, "_ga=[^;]+(; )?", "");
+    set req.http.Cookie = regsuball(req.http.Cookie, "_gat=[^;]+(; )?", "");
+    set req.http.Cookie = regsuball(req.http.Cookie, "utmctr=[^;]+(; )?", "");
+    set req.http.Cookie = regsuball(req.http.Cookie, "utmcmd.=[^;]+(; )?", "");
+    set req.http.Cookie = regsuball(req.http.Cookie, "utmccn.=[^;]+(; )?", "");
+  
+    # Remove DoubleClick offensive cookies
+    set req.http.Cookie = regsuball(req.http.Cookie, "__gads=[^;]+(; )?", "");
+  
+    # Remove the Quant Capital cookies (added by some plugin, all __qca)
+    set req.http.Cookie = regsuball(req.http.Cookie, "__qc.=[^;]+(; )?", "");
+  
+    # Remove the AddThis cookies
+    set req.http.Cookie = regsuball(req.http.Cookie, "__atuv.=[^;]+(; )?", "");
+  
+    # Remove a ";" prefix in the cookie if present
+    set req.http.Cookie = regsuball(req.http.Cookie, "^;\s*", "");
+  }
 
   # Are there cookies left with only spaces or that are empty?
   if (req.http.cookie ~ "^\s*$") {
     unset req.http.cookie;
   }
 
-  if (req.http.Cache-Control ~ "(?i)no-cache") {
-  #if (req.http.Cache-Control ~ "(?i)no-cache" && client.ip ~ editors) { # create the acl editors if you want to restrict the Ctrl-F5
-  # http://varnish.projects.linpro.no/wiki/VCLExampleEnableForceRefresh
-  # Ignore requests via proxy caches and badly behaved crawlers
-  # like msnbot that send no-cache with every request.
-    if (! (req.http.Via || req.http.User-Agent ~ "(?i)bot" || req.http.X-Purge)) {
-      #set req.hash_always_miss = true; # Doesn't seems to refresh the object in the cache
-      return(purge); # Couple this with restart in vcl_purge and X-Purge header to avoid loops
-    }
-  }
+  #if (req.http.Cache-Control ~ "(?i)no-cache") {
+    #if (client.ip ~ purge) {
+      # Ignore requests via proxy caches and badly behaved crawlers
+      # like msnbot that send no-cache with every request.
+      #if (! (req.http.Via || req.http.User-Agent ~ "(?i)bot" || req.http.X-Purge)) {
+        #set req.hash_always_miss = true; # Doesn't seems to refresh the object in the cache
+        #return(purge); # Couple this with restart in vcl_purge and X-Purge header to avoid loops
+      #}
+    #}
+  #}
 
   # Large static files are delivered directly to the end-user without
   # waiting for Varnish to fully read the file first.
@@ -237,6 +237,11 @@ sub vcl_hash {
   if (req.http.Cookie) {
     hash_data(req.http.Cookie);
   }
+
+  # Cache the HTTP vs HTTPs separately
+  if (req.http.X-Forwarded-Proto) {
+    hash_data(req.http.X-Forwarded-Proto);
+  }
 }
 
 sub vcl_hit {
@@ -248,13 +253,18 @@ sub vcl_hit {
   }
 
   # https://www.varnish-cache.org/docs/trunk/users-guide/vcl-grace.html
-  # When several clients are requesting the same page Varnish will send one request to the backend and place the others on hold while fetching one copy from the backend. In some products this is called request coalescing and Varnish does this automatically.
-  # If you are serving thousands of hits per second the queue of waiting requests can get huge. There are two potential problems - one is a thundering herd problem - suddenly releasing a thousand threads to serve content might send the load sky high. Secondly - nobody likes to wait. To deal with this we can instruct Varnish to keep the objects in cache beyond their TTL and to serve the waiting requests somewhat stale content.
+  # When several clients are requesting the same page Varnish will send one request to the backend and place the others
+  # on hold while fetching one copy from the backend. In some products this is called request coalescing and Varnish does
+  # this automatically.
+  # If you are serving thousands of hits per second the queue of waiting requests can get huge. There are two potential
+  # problems - one is a thundering herd problem - suddenly releasing a thousand threads to serve content might send the
+  # load sky high. Secondly - nobody likes to wait. To deal with this we can instruct Varnish to keep the objects in cache
+  # beyond their TTL and to serve the waiting requests somewhat stale content.
 
 # if (!std.healthy(req.backend_hint) && (obj.ttl + obj.grace > 0s)) {
 #   return (deliver);
 # } else {
-#   return (fetch);
+#   return (miss);
 # }
 
   # We have no fresh fish. Lets look at the stale ones.
@@ -263,23 +273,14 @@ sub vcl_hit {
     if (obj.ttl + 10s > 0s) {
       #set req.http.grace = "normal(limited)";
       return (deliver);
-    } else {
-      # No candidate for grace. Fetch a fresh object.
-      return(fetch);
     }
   } else {
     # backend is sick - use full grace
       if (obj.ttl + obj.grace > 0s) {
-      #set req.http.grace = "full";
-      return (deliver);
-    } else {
-      # no graced object.
-      return (fetch);
-    }
+        #set req.http.grace = "full";
+        return (deliver);
+      }
   }
-
-  # fetch & deliver once we get the result
-  return (fetch); # Dead code, keep as a safeguard
 }
 
 sub vcl_miss {
@@ -313,7 +314,6 @@ sub vcl_backend_response {
   if (bereq.url ~ "^[^?]*\.(7z|avi|bz2|flac|flv|gz|mka|mkv|mov|mp3|mp4|mpeg|mpg|ogg|ogm|opus|rar|tar|tgz|tbz|txz|wav|webm|xz|zip)(\?.*)?$") {
     unset beresp.http.set-cookie;
     set beresp.do_stream = true;  # Check memory usage it'll grow in fetch_chunksize blocks (128k by default) if the backend doesn't send a Content-Length header, so only enable it for big objects
-    set beresp.do_gzip = false;   # Don't try to compress it for storage
   }
 
   # Sometimes, a 301 or 302 redirect formed via Apache's mod_rewrite can mess with the HTTP port that is being passed along.
@@ -333,6 +333,11 @@ sub vcl_backend_response {
     return (deliver);
   }
 
+  # Don't cache 50x responses
+  if (beresp.status == 500 || beresp.status == 502 || beresp.status == 503 || beresp.status == 504) {
+    return (abandon);
+  }
+
   # Allow stale content, in case the backend goes down.
   # make Varnish keep all objects for 6 hours beyond their TTL
   set beresp.grace = 6h;
@@ -346,15 +351,15 @@ sub vcl_deliver {
   # Called before a cached object is delivered to the client.
 
   if (obj.hits > 0) { # Add debug header to see if it's a HIT/MISS and the number of hits, disable when not needed
-    set resp.http.X-Varnish-Cache = "HIT";
+    set resp.http.X-Cache = "HIT";
   } else {
-    set resp.http.X-Varnish-Cache = "MISS";
+    set resp.http.X-Cache = "MISS";
   }
 
   # Please note that obj.hits behaviour changed in 4.0, now it counts per objecthead, not per object
   # and obj.hits may not be reset in some cases where bans are in use. See bug 1492 for details.
   # So take hits with a grain of salt
-  set resp.http.X-Varnish-Cache-Hits = obj.hits;
+  set resp.http.X-Cache-Hits = obj.hits;
 
   # Remove some headers: PHP version
   unset resp.http.X-Powered-By;
@@ -372,7 +377,7 @@ sub vcl_deliver {
 
 sub vcl_purge {
   # Only handle actual PURGE HTTP methods, everything else is discarded
-  if (req.method != "PURGE") {
+  if (req.method == "PURGE") {
     # restart request
     set req.http.X-Purge = "Yes";
     return(restart);
